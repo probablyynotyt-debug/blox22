@@ -26,7 +26,8 @@ import {
 import { ExperienceData } from '../types/experience';
 import { CustomClothingItem } from '../types/avatarInventory';
 
-import { getSavedShirtsInventory, getSavedPantsInventory } from '../types/avatarInventory';
+import { getSavedShirtsInventory, getSavedPantsInventory, deduplicateCustomClothingItems } from '../types/avatarInventory';
+import { getSavedMarketplaceItems, MarketplaceClothingItem } from '../types/marketplace';
 
 interface UserProfileModalProps {
   userId: string;
@@ -94,21 +95,36 @@ export default function UserProfileModal({
     (exp) => exp.creatorId === profile.id || exp.creatorUsername === profile.username
   );
 
-  // User's clothing (ONLY things made by this user show on their profile)
-  const userClothing: { type: 'shirt' | 'pants'; name: string; url: string }[] = [];
+  // User's clothing (Things made by this user in inventory or marketplace)
+  const [marketItems, setMarketItems] = useState<MarketplaceClothingItem[]>([]);
+
+  useEffect(() => {
+    getSavedMarketplaceItems().then((items) => setMarketItems(items));
+  }, []);
+
   const savedShirts = getSavedShirtsInventory();
   const savedPants = getSavedPantsInventory();
+
+  const combinedCreations: { type: 'shirt' | 'pants'; name: string; url: string }[] = [];
+  const seenUrls = new Set<string>();
+  const seenNames = new Set<string>();
+
+  const addUnique = (type: 'shirt' | 'pants', name: string, url: string) => {
+    const normName = `${type}_${name.trim().toLowerCase()}`;
+    const normUrl = url.trim();
+    if (!seenUrls.has(normUrl) && !seenNames.has(normName)) {
+      seenUrls.add(normUrl);
+      seenNames.add(normName);
+      combinedCreations.push({ type, name, url });
+    }
+  };
 
   savedShirts.forEach((s) => {
     if (
       s.isCreator &&
       (s.creatorId === profile.id || (s.creatorUsername && s.creatorUsername.toLowerCase() === profile.username.toLowerCase()))
     ) {
-      userClothing.push({
-        type: 'shirt',
-        name: s.name,
-        url: s.dataUrl,
-      });
+      addUnique('shirt', s.name, s.dataUrl);
     }
   });
 
@@ -117,13 +133,20 @@ export default function UserProfileModal({
       p.isCreator &&
       (p.creatorId === profile.id || (p.creatorUsername && p.creatorUsername.toLowerCase() === profile.username.toLowerCase()))
     ) {
-      userClothing.push({
-        type: 'pants',
-        name: p.name,
-        url: p.dataUrl,
-      });
+      addUnique('pants', p.name, p.dataUrl);
     }
   });
+
+  marketItems.forEach((m) => {
+    if (
+      m.creatorId === profile.id ||
+      (m.creatorUsername && m.creatorUsername.toLowerCase() === profile.username.toLowerCase())
+    ) {
+      addUnique(m.type, m.name, m.dataUrl);
+    }
+  });
+
+  const userClothing = combinedCreations;
 
   const handleSendFriendReq = async () => {
     if (!currentUserProfile) return;

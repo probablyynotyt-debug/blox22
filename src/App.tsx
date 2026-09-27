@@ -41,7 +41,9 @@ import {
   subscribeExperiencesFromFirestore,
   saveExperienceToFirestore,
   deleteExperienceFromFirestore,
-  deleteAllExperiencesFromFirestore
+  deleteAllExperiencesFromFirestore,
+  incrementExperienceVisitsInFirestore,
+  updateExperienceRatingsInFirestore
 } from './services/firebase';
 import {
   ExperienceData,
@@ -445,8 +447,24 @@ export default function App() {
   useEffect(() => {
     const unsub = subscribeExperiencesFromFirestore((remoteExps) => {
       const valid = (remoteExps || []).filter((e) => e && e.id && e.id !== 'exp-default-1');
-      setExperiences(valid);
-      saveExperiences(valid);
+      setExperiences((prev) => {
+        const reactionMap = new Map<string, { userLiked?: 'like' | 'dislike' | null; userFavorited?: boolean }>();
+        prev.forEach((p) => {
+          reactionMap.set(p.id, { userLiked: p.userLiked, userFavorited: p.userFavorited });
+        });
+
+        const merged = valid.map((rem) => {
+          const localReaction = reactionMap.get(rem.id);
+          return {
+            ...rem,
+            userLiked: localReaction?.userLiked !== undefined ? localReaction.userLiked : rem.userLiked,
+            userFavorited: localReaction?.userFavorited !== undefined ? localReaction.userFavorited : rem.userFavorited,
+          };
+        });
+
+        saveExperiences(merged);
+        return merged;
+      });
     });
     return () => unsub?.();
   }, []);
@@ -551,6 +569,10 @@ export default function App() {
   // Real Likes & Dislikes handler for the game screen
   const handleToggleLike = (expId: string) => {
     setExperiences((prev) => {
+      let finalLikes = 0;
+      let finalDislikes = 0;
+      let finalFavs = 0;
+
       const next = prev.map((exp) => {
         if (exp.id !== expId) return exp;
         const currentLiked = exp.userLiked;
@@ -567,6 +589,10 @@ export default function App() {
           nextUserLiked = 'like';
         }
 
+        finalLikes = newLikes;
+        finalDislikes = newDislikes;
+        finalFavs = exp.favorites || 0;
+
         const updated = {
           ...exp,
           likes: newLikes,
@@ -576,13 +602,19 @@ export default function App() {
         if (selectedExperience?.id === exp.id) setSelectedExperience(updated);
         return updated;
       });
+
       saveExperiences(next);
+      updateExperienceRatingsInFirestore(expId, finalLikes, finalDislikes, finalFavs);
       return next;
     });
   };
 
   const handleToggleDislike = (expId: string) => {
     setExperiences((prev) => {
+      let finalLikes = 0;
+      let finalDislikes = 0;
+      let finalFavs = 0;
+
       const next = prev.map((exp) => {
         if (exp.id !== expId) return exp;
         const currentLiked = exp.userLiked;
@@ -599,6 +631,10 @@ export default function App() {
           nextUserLiked = 'dislike';
         }
 
+        finalLikes = newLikes;
+        finalDislikes = newDislikes;
+        finalFavs = exp.favorites || 0;
+
         const updated = {
           ...exp,
           likes: newLikes,
@@ -608,13 +644,19 @@ export default function App() {
         if (selectedExperience?.id === exp.id) setSelectedExperience(updated);
         return updated;
       });
+
       saveExperiences(next);
+      updateExperienceRatingsInFirestore(expId, finalLikes, finalDislikes, finalFavs);
       return next;
     });
   };
 
   const handleToggleFavorite = (expId: string) => {
     setExperiences((prev) => {
+      let finalLikes = 0;
+      let finalDislikes = 0;
+      let finalFavs = 0;
+
       const next = prev.map((exp) => {
         if (exp.id !== expId) return exp;
         const isFav = exp.userFavorited;
@@ -629,6 +671,10 @@ export default function App() {
           nextFav = true;
         }
 
+        finalLikes = exp.likes || 0;
+        finalDislikes = exp.dislikes || 0;
+        finalFavs = newFavs;
+
         const updated = {
           ...exp,
           favorites: newFavs,
@@ -637,7 +683,9 @@ export default function App() {
         if (selectedExperience?.id === exp.id) setSelectedExperience(updated);
         return updated;
       });
+
       saveExperiences(next);
+      updateExperienceRatingsInFirestore(expId, finalLikes, finalDislikes, finalFavs);
       return next;
     });
   };
@@ -674,8 +722,9 @@ export default function App() {
 
   // Launch into the full-screen 3D Baseplate
   const handlePlayClick = () => {
-    // Increment visit count for real
+    // Increment visit count for real locally and in Firestore
     if (selectedExperience) {
+      incrementExperienceVisitsInFirestore(selectedExperience.id);
       setExperiences((prev) => {
         const next = prev.map((exp) =>
           exp.id === selectedExperience.id ? { ...exp, visits: (exp.visits || 0) + 1 } : exp
@@ -683,6 +732,7 @@ export default function App() {
         saveExperiences(next);
         return next;
       });
+      setSelectedExperience((prev) => (prev ? { ...prev, visits: (prev.visits || 0) + 1 } : null));
     }
     setCurrentView('playing');
   };

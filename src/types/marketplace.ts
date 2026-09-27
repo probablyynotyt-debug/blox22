@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, updateDoc, increment, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
 import { getSeedMarketplaceItems } from '../utils/marketplaceClothingSeeds';
 import {
@@ -27,8 +27,58 @@ export const MARKETPLACE_STORAGE_KEY = 'boblox_marketplace_items_v3';
 
 let memoryCache: MarketplaceClothingItem[] | null = null;
 
+/**
+ * Deduplicate Marketplace Items by normalized name (case-insensitive) and dataUrl.
+ * Keeps the newest/best item and automatically deletes duplicate documents from Firestore.
+ */
+export function deduplicateMarketplaceItems(
+  items: MarketplaceClothingItem[],
+  deleteRemoteDuplicates: boolean = false
+): MarketplaceClothingItem[] {
+  if (!items || items.length === 0) return [];
+  const nameMap = new Map<string, MarketplaceClothingItem>();
+  const urlMap = new Map<string, MarketplaceClothingItem>();
+  const duplicateDocIds: string[] = [];
+  const uniqueItems: MarketplaceClothingItem[] = [];
+
+  // Sort by createdAt descending (newest first)
+  const sorted = [...items].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  for (const item of sorted) {
+    if (!item.name || !item.dataUrl) continue;
+    if (isFirebaseStorageOrDeletedUrl(item.dataUrl) || isFirebaseStorageOrDeletedUrl(item.previewUrl)) {
+      duplicateDocIds.push(item.id);
+      continue;
+    }
+
+    const normName = `${item.type}_${item.name.trim().toLowerCase()}`;
+    const normUrl = item.dataUrl.trim();
+
+    if (nameMap.has(normName) || urlMap.has(normUrl)) {
+      // It's a duplicate of an existing newer or already registered item!
+      duplicateDocIds.push(item.id);
+      continue;
+    }
+
+    nameMap.set(normName, item);
+    urlMap.set(normUrl, item);
+    uniqueItems.push(item);
+  }
+
+  // Asynchronously clean duplicate items from Firestore if requested
+  if (deleteRemoteDuplicates && duplicateDocIds.length > 0) {
+    duplicateDocIds.forEach((dupId) => {
+      deleteDoc(doc(db, 'marketplace_items', dupId)).catch(() => {});
+    });
+  }
+
+  return uniqueItems;
+}
+
 export async function getSavedMarketplaceItems(): Promise<MarketplaceClothingItem[]> {
-  if (memoryCache && memoryCache.length > 0) return memoryCache;
+  if (memoryCache && memoryCache.length > 0) {
+    return deduplicateMarketplaceItems(memoryCache);
+  }
 
   let baseItems: MarketplaceClothingItem[] = [];
 
@@ -51,31 +101,30 @@ export async function getSavedMarketplaceItems(): Promise<MarketplaceClothingIte
     baseItems = await getSeedMarketplaceItems();
   }
 
-  // Ensure clean items
-  baseItems = baseItems.filter(
-    (item) => !isFirebaseStorageOrDeletedUrl(item.dataUrl) && !isFirebaseStorageOrDeletedUrl(item.previewUrl)
-  );
+  // Ensure deduplication & clean items
+  const deduplicated = deduplicateMarketplaceItems(baseItems, true);
 
-  memoryCache = baseItems;
+  memoryCache = deduplicated;
   try {
-    localStorage.setItem(MARKETPLACE_STORAGE_KEY, JSON.stringify(baseItems));
+    localStorage.setItem(MARKETPLACE_STORAGE_KEY, JSON.stringify(deduplicated));
   } catch (e) {
     // ignore
   }
-  return baseItems;
+  return deduplicated;
 }
 
 export function saveLocalMarketplaceItems(items: MarketplaceClothingItem[]) {
-  memoryCache = items;
+  const cleanItems = deduplicateMarketplaceItems(items);
+  memoryCache = cleanItems;
   try {
-    localStorage.setItem(MARKETPLACE_STORAGE_KEY, JSON.stringify(items));
+    localStorage.setItem(MARKETPLACE_STORAGE_KEY, JSON.stringify(cleanItems));
   } catch (e) {
     console.error('Failed to cache marketplace items:', e);
   }
 }
 
 /**
- * Batch publish multiple clothing items into marketplace
+ * Batch publish multiple clothing items into marketplace and Firestore
  */
 export async function publishMultipleItemsToMarketplace(
   newItems: MarketplaceClothingItem[]
@@ -84,28 +133,28 @@ export async function publishMultipleItemsToMarketplace(
 
   try {
     const current = await getSavedMarketplaceItems();
-    const newItemIds = new Set(newItems.map((i) => i.id));
-    const filteredCurrent = current.filter((i) => !newItemIds.has(i.id));
-    const updated = [...newItems, ...filteredCurrent];
-    saveLocalMarketplaceItems(updated);
+    const merged = [...newItems, ...current];
+    const deduplicated = deduplicateMarketplaceItems(merged, true);
+    
+    saveLocalMarketplaceItems(deduplicated);
 
-    // Sync to Firestore in batch / parallel
+    // Sync every item directly to Firestore
     try {
-      const promises = newItems.map((item) => {
+      const promises = deduplicated.map((item) => {
         const itemRef = doc(db, 'marketplace_items', item.id);
         return setDoc(itemRef, item, { merge: true });
       });
       await Promise.allSettled(promises);
-    } catch {
-      // offline or local
+    } catch (e) {
+      console.warn('Firestore marketplace batch sync note:', e);
     }
 
     // Trigger window event so listeners update immediately
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('boblox-marketplace-updated', { detail: { count: newItems.length } }));
+      window.dispatchEvent(new CustomEvent('boblox-marketplace-updated', { detail: { count: deduplicated.length } }));
     }
 
-    return updated;
+    return deduplicated;
   } catch (err) {
     console.error('Failed to batch publish items:', err);
     return [];
@@ -118,13 +167,19 @@ export async function publishMultipleItemsToMarketplace(
 export async function publishItemToMarketplace(item: MarketplaceClothingItem) {
   try {
     const current = await getSavedMarketplaceItems();
-    const updated = [item, ...current.filter((i) => i.id !== item.id)];
-    saveLocalMarketplaceItems(updated);
+    const merged = [item, ...current.filter((i) => i.id !== item.id)];
+    const deduplicated = deduplicateMarketplaceItems(merged, true);
+    saveLocalMarketplaceItems(deduplicated);
 
     // Sync to Firestore
     const itemRef = doc(db, 'marketplace_items', item.id);
     await setDoc(itemRef, item, { merge: true });
-    return updated;
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('boblox-marketplace-updated', { detail: { count: 1 } }));
+    }
+
+    return deduplicated;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `marketplace_items/${item.id}`);
     return [];
@@ -133,7 +188,7 @@ export async function publishItemToMarketplace(item: MarketplaceClothingItem) {
 
 /**
  * Buy/Get a marketplace item (Free).
- * Saves to user inventory and increments the bought count.
+ * Saves to user inventory and increments the bought count in Firestore and LocalStorage.
  */
 export async function buyMarketplaceItem(
   item: MarketplaceClothingItem
@@ -182,7 +237,7 @@ export async function buyMarketplaceItem(
       boughtCount: increment(1),
     });
   } catch {
-    // offline or local
+    // offline or local fallback
   }
 
   return updatedItem;
@@ -194,15 +249,25 @@ export async function buyMarketplaceItem(
 export function isItemInInventory(item: MarketplaceClothingItem): boolean {
   if (item.type === 'shirt') {
     const shirts = getSavedShirtsInventory();
-    return shirts.some((s) => s.id === item.id || s.dataUrl === item.dataUrl);
+    return shirts.some(
+      (s) =>
+        s.id === item.id ||
+        s.dataUrl === item.dataUrl ||
+        s.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+    );
   } else {
     const pants = getSavedPantsInventory();
-    return pants.some((p) => p.id === item.id || p.dataUrl === item.dataUrl);
+    return pants.some(
+      (p) =>
+        p.id === item.id ||
+        p.dataUrl === item.dataUrl ||
+        p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+    );
   }
 }
 
 /**
- * Real-time subscription to marketplace items from Firestore
+ * Real-time subscription to marketplace items from Firestore with automatic deduplication
  */
 export function subscribeMarketplaceFromFirestore(
   callback: (items: MarketplaceClothingItem[]) => void
@@ -216,8 +281,10 @@ export function subscribeMarketplaceFromFirestore(
         .filter(
           (item) => !isFirebaseStorageOrDeletedUrl(item.dataUrl) && !isFirebaseStorageOrDeletedUrl(item.previewUrl)
         );
-      if (remote.length > 0) {
-        callback(remote);
+      
+      const deduplicated = deduplicateMarketplaceItems(remote, true);
+      if (deduplicated.length > 0) {
+        callback(deduplicated);
       }
     },
     (err) => {
@@ -225,3 +292,4 @@ export function subscribeMarketplaceFromFirestore(
     }
   );
 }
+

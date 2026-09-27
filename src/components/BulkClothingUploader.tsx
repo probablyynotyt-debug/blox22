@@ -121,12 +121,30 @@ export default function BulkClothingUploader({
 
     setQueuedShirts((prev) => {
       const updated = [...prev, ...newItems];
-      // Renumber valid shirts sequentially
+      // Deduplicate queued shirts by name or dataUrl
+      const seenNames = new Set<string>();
+      const seenUrls = new Set<string>();
+      const unique: QueuedItem[] = [];
+
+      for (const item of updated) {
+        if (item.status === 'ready') {
+          const normName = item.name.trim().toLowerCase();
+          const normUrl = item.dataUrl.trim();
+          if (seenNames.has(normName) || seenUrls.has(normUrl)) {
+            continue; // filter out duplicate
+          }
+          seenNames.add(normName);
+          seenUrls.add(normUrl);
+        }
+        unique.push(item);
+      }
+
       let validCount = 0;
-      return updated.map((item) => {
+      return unique.map((item) => {
         if (item.status === 'ready') {
           validCount++;
-          return { ...item, name: `Shirt ${validCount}` };
+          // Keep custom name or format
+          return item;
         }
         return item;
       });
@@ -143,8 +161,11 @@ export default function BulkClothingUploader({
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const seqNumber = startIndex + i + 1;
-      const defaultName = `Pants ${seqNumber}`;
+      const cleanFileName = file.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[_-]/g, ' ')
+        .trim();
+      const defaultName = cleanFileName || `Pants ${startIndex + i + 1}`;
 
       try {
         const result = await validatePantsTemplate(file);
@@ -185,15 +206,25 @@ export default function BulkClothingUploader({
 
     setQueuedPants((prev) => {
       const updated = [...prev, ...newItems];
-      // Renumber valid pants sequentially
-      let validCount = 0;
-      return updated.map((item) => {
+      // Deduplicate queued pants by name or dataUrl
+      const seenNames = new Set<string>();
+      const seenUrls = new Set<string>();
+      const unique: QueuedItem[] = [];
+
+      for (const item of updated) {
         if (item.status === 'ready') {
-          validCount++;
-          return { ...item, name: `Pants ${validCount}` };
+          const normName = item.name.trim().toLowerCase();
+          const normUrl = item.dataUrl.trim();
+          if (seenNames.has(normName) || seenUrls.has(normUrl)) {
+            continue; // filter out duplicate
+          }
+          seenNames.add(normName);
+          seenUrls.add(normUrl);
         }
-        return item;
-      });
+        unique.push(item);
+      }
+
+      return unique;
     });
     setIsProcessingFiles(false);
   };
@@ -247,26 +278,35 @@ export default function BulkClothingUploader({
       const totalSteps = totalValidItems * 2; // texture + preview for each
       let currentStep = 0;
 
-      // 1. Upload all Shirts to Cloudinary
+      // 1. Upload all Shirts to Cloudinary (with fallback to validated dataUrl)
       const customShirts: CustomClothingItem[] = [];
       for (let i = 0; i < validShirts.length; i++) {
         const s = validShirts[i];
         
         // Upload template texture to Cloudinary
-        const cloudTextureUrl = await uploadToCloudinary(s.dataUrl, {
-          folder: 'boblox_clothing/shirts',
-          tags: ['shirt', currentUser.username],
-        });
+        let cloudTextureUrl = s.dataUrl;
+        try {
+          cloudTextureUrl = await uploadToCloudinary(s.dataUrl, {
+            folder: 'boblox_clothing/shirts',
+            tags: ['shirt', currentUser.username],
+          });
+        } catch (err) {
+          console.warn('Cloudinary shirt upload fallback:', err);
+        }
         currentStep++;
         setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
 
         // Upload preview to Cloudinary if available
         let cloudPreviewUrl = s.previewUrl;
         if (s.previewUrl) {
-          cloudPreviewUrl = await uploadToCloudinary(s.previewUrl, {
-            folder: 'boblox_clothing/previews',
-            tags: ['preview', 'shirt'],
-          });
+          try {
+            cloudPreviewUrl = await uploadToCloudinary(s.previewUrl, {
+              folder: 'boblox_clothing/previews',
+              tags: ['preview', 'shirt'],
+            });
+          } catch (err) {
+            console.warn('Cloudinary preview upload fallback:', err);
+          }
         }
         currentStep++;
         setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
@@ -284,26 +324,35 @@ export default function BulkClothingUploader({
         });
       }
 
-      // 2. Upload all Pants to Cloudinary
+      // 2. Upload all Pants to Cloudinary (with fallback to validated dataUrl)
       const customPants: CustomClothingItem[] = [];
       for (let i = 0; i < validPants.length; i++) {
         const p = validPants[i];
 
         // Upload template texture to Cloudinary
-        const cloudTextureUrl = await uploadToCloudinary(p.dataUrl, {
-          folder: 'boblox_clothing/pants',
-          tags: ['pants', currentUser.username],
-        });
+        let cloudTextureUrl = p.dataUrl;
+        try {
+          cloudTextureUrl = await uploadToCloudinary(p.dataUrl, {
+            folder: 'boblox_clothing/pants',
+            tags: ['pants', currentUser.username],
+          });
+        } catch (err) {
+          console.warn('Cloudinary pants upload fallback:', err);
+        }
         currentStep++;
         setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
 
         // Upload preview to Cloudinary if available
         let cloudPreviewUrl = p.previewUrl;
         if (p.previewUrl) {
-          cloudPreviewUrl = await uploadToCloudinary(p.previewUrl, {
-            folder: 'boblox_clothing/previews',
-            tags: ['preview', 'pants'],
-          });
+          try {
+            cloudPreviewUrl = await uploadToCloudinary(p.previewUrl, {
+              folder: 'boblox_clothing/previews',
+              tags: ['preview', 'pants'],
+            });
+          } catch (err) {
+            console.warn('Cloudinary pants preview upload fallback:', err);
+          }
         }
         currentStep++;
         setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));

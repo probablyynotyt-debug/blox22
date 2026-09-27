@@ -25,19 +25,51 @@ export function isFirebaseStorageOrDeletedUrl(url?: string | null): boolean {
   );
 }
 
+/**
+ * Deduplicate clothing items by normalized name (case-insensitive) and dataUrl.
+ * Keeps the newest item among duplicates.
+ */
+export function deduplicateCustomClothingItems(items: CustomClothingItem[]): CustomClothingItem[] {
+  if (!items || items.length === 0) return [];
+  const nameMap = new Map<string, CustomClothingItem>();
+  const urlMap = new Map<string, CustomClothingItem>();
+  const result: CustomClothingItem[] = [];
+
+  // Sort newest first
+  const sorted = [...items].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  for (const item of sorted) {
+    if (!item.name || !item.dataUrl) continue;
+    if (isFirebaseStorageOrDeletedUrl(item.dataUrl) || isFirebaseStorageOrDeletedUrl(item.previewUrl)) {
+      continue;
+    }
+
+    const normName = `${item.type}_${item.name.trim().toLowerCase()}`;
+    const normUrl = item.dataUrl.trim();
+
+    if (nameMap.has(normName) || urlMap.has(normUrl)) {
+      // duplicate detected, skip older duplicate
+      continue;
+    }
+
+    nameMap.set(normName, item);
+    urlMap.set(normUrl, item);
+    result.push(item);
+  }
+
+  return result;
+}
+
 export function getSavedShirtsInventory(): CustomClothingItem[] {
   try {
     const raw = localStorage.getItem(SHIRTS_INVENTORY_KEY);
     if (raw) {
       const list: CustomClothingItem[] = JSON.parse(raw);
-      // Clean out any old items uploaded via firebase storage or local clothing folder
-      const filtered = list.filter(
-        (item) => !isFirebaseStorageOrDeletedUrl(item.dataUrl) && !isFirebaseStorageOrDeletedUrl(item.previewUrl)
-      );
-      if (filtered.length !== list.length) {
-        localStorage.setItem(SHIRTS_INVENTORY_KEY, JSON.stringify(filtered));
+      const deduplicated = deduplicateCustomClothingItems(list);
+      if (deduplicated.length !== list.length) {
+        localStorage.setItem(SHIRTS_INVENTORY_KEY, JSON.stringify(deduplicated));
       }
-      return filtered;
+      return deduplicated;
     }
   } catch (e) {
     console.error('Failed to load shirts inventory:', e);
@@ -48,7 +80,7 @@ export function getSavedShirtsInventory(): CustomClothingItem[] {
 export function saveShirtToInventory(item: CustomClothingItem) {
   try {
     const current = getSavedShirtsInventory();
-    const updated = [item, ...current.filter((i) => i.id !== item.id)];
+    const updated = deduplicateCustomClothingItems([item, ...current.filter((i) => i.id !== item.id)]);
     localStorage.setItem(SHIRTS_INVENTORY_KEY, JSON.stringify(updated));
     return updated;
   } catch (e) {
@@ -61,8 +93,7 @@ export function saveMultipleShirtsToInventory(items: CustomClothingItem[]) {
   if (!items || items.length === 0) return getSavedShirtsInventory();
   try {
     const current = getSavedShirtsInventory();
-    const newIds = new Set(items.map((i) => i.id));
-    const updated = [...items, ...current.filter((i) => !newIds.has(i.id))];
+    const updated = deduplicateCustomClothingItems([...items, ...current]);
     localStorage.setItem(SHIRTS_INVENTORY_KEY, JSON.stringify(updated));
     return updated;
   } catch (e) {
@@ -76,13 +107,11 @@ export function getSavedPantsInventory(): CustomClothingItem[] {
     const raw = localStorage.getItem(PANTS_INVENTORY_KEY);
     if (raw) {
       const list: CustomClothingItem[] = JSON.parse(raw);
-      const filtered = list.filter(
-        (item) => !isFirebaseStorageOrDeletedUrl(item.dataUrl) && !isFirebaseStorageOrDeletedUrl(item.previewUrl)
-      );
-      if (filtered.length !== list.length) {
-        localStorage.setItem(PANTS_INVENTORY_KEY, JSON.stringify(filtered));
+      const deduplicated = deduplicateCustomClothingItems(list);
+      if (deduplicated.length !== list.length) {
+        localStorage.setItem(PANTS_INVENTORY_KEY, JSON.stringify(deduplicated));
       }
-      return filtered;
+      return deduplicated;
     }
   } catch (e) {
     console.error('Failed to load pants inventory:', e);
@@ -93,7 +122,7 @@ export function getSavedPantsInventory(): CustomClothingItem[] {
 export function savePantsToInventory(item: CustomClothingItem) {
   try {
     const current = getSavedPantsInventory();
-    const updated = [item, ...current.filter((i) => i.id !== item.id)];
+    const updated = deduplicateCustomClothingItems([item, ...current.filter((i) => i.id !== item.id)]);
     localStorage.setItem(PANTS_INVENTORY_KEY, JSON.stringify(updated));
     return updated;
   } catch (e) {
@@ -106,8 +135,7 @@ export function saveMultiplePantsToInventory(items: CustomClothingItem[]) {
   if (!items || items.length === 0) return getSavedPantsInventory();
   try {
     const current = getSavedPantsInventory();
-    const newIds = new Set(items.map((i) => i.id));
-    const updated = [...items, ...current.filter((i) => !newIds.has(i.id))];
+    const updated = deduplicateCustomClothingItems([...items, ...current]);
     localStorage.setItem(PANTS_INVENTORY_KEY, JSON.stringify(updated));
     return updated;
   } catch (e) {
@@ -115,3 +143,4 @@ export function saveMultiplePantsToInventory(items: CustomClothingItem[]) {
     return getSavedPantsInventory();
   }
 }
+

@@ -32,6 +32,7 @@ import {
   buyMarketplaceItem,
   isItemInInventory,
   subscribeMarketplaceFromFirestore,
+  deduplicateMarketplaceItems,
 } from '../types/marketplace';
 import { UserProfile } from '../services/firebase';
 import { getFaceTexture } from '../utils/faceTexture';
@@ -125,7 +126,7 @@ export default function Marketplace({
           const map = new Map<string, MarketplaceClothingItem>();
           prev.forEach((i) => map.set(i.id, i));
           remoteItems.forEach((i) => map.set(i.id, i));
-          return Array.from(map.values());
+          return deduplicateMarketplaceItems(Array.from(map.values()), true);
         });
       }
     });

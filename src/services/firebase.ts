@@ -26,6 +26,7 @@ import {
   getDocFromServer,
   arrayUnion,
   arrayRemove,
+  increment,
 } from 'firebase/firestore';
 import { AvatarColors } from '../components/AvatarViewer';
 import { ExperienceData, StudioPart } from '../types/experience';
@@ -471,6 +472,35 @@ export async function deleteAllExperiencesFromFirestore() {
     await Promise.all(promises);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, 'experiences');
+  }
+}
+
+export async function incrementExperienceVisitsInFirestore(expId: string) {
+  try {
+    const expDocRef = doc(db, 'experiences', expId);
+    await updateDoc(expDocRef, {
+      visits: increment(1),
+    });
+  } catch (err) {
+    // If doc was created locally before sync, non-fatal
+  }
+}
+
+export async function updateExperienceRatingsInFirestore(
+  expId: string,
+  likes: number,
+  dislikes: number,
+  favorites: number
+) {
+  try {
+    const expDocRef = doc(db, 'experiences', expId);
+    await updateDoc(expDocRef, {
+      likes,
+      dislikes,
+      favorites,
+    });
+  } catch (err) {
+    // non-fatal
   }
 }
 

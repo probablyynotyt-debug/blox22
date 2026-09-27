@@ -35,7 +35,8 @@ import {
 } from '../services/firebase';
 import { ExperienceData, formatTimeAgo } from '../types/experience';
 import { AvatarColors, DEFAULT_GREY } from './AvatarViewer';
-import { getSavedShirtsInventory, getSavedPantsInventory, CustomClothingItem } from '../types/avatarInventory';
+import { getSavedShirtsInventory, getSavedPantsInventory, CustomClothingItem, deduplicateCustomClothingItems } from '../types/avatarInventory';
+import { getSavedMarketplaceItems, MarketplaceClothingItem, subscribeMarketplaceFromFirestore } from '../types/marketplace';
 import { getFaceTexture, createFaceMesh } from '../utils/faceTexture';
 import { attachShirtToLimbs } from '../utils/shirtTexture';
 import { attachPantsToLimbs } from '../utils/pantsTexture';
@@ -101,6 +102,14 @@ export default function ProfilePage({
     return () => unsub();
   }, [userId]);
 
+  const [marketplaceItems, setMarketplaceItems] = useState<MarketplaceClothingItem[]>([]);
+
+  useEffect(() => {
+    getSavedMarketplaceItems().then((items) => setMarketplaceItems(items));
+    const unsub = subscribeMarketplaceFromFirestore((items) => setMarketplaceItems(items));
+    return () => unsub?.();
+  }, []);
+
   const isFriend = currentUserProfile?.friends?.includes(profile?.id || '') || profile?.friends?.includes(currentUserId);
   const hasSentRequest = profile?.friendRequests?.some((r) => r.fromUid === currentUserId) || requestSent;
   const isFollowing = currentUserProfile?.following?.includes(profile?.id || '');
@@ -110,15 +119,68 @@ export default function ProfilePage({
     (exp) => exp.creatorId === profile?.id || exp.creatorUsername === profile?.username
   );
 
-  // User's created clothing ONLY (ONLY items made by this user)
+  // User's created clothing ONLY (Items made by this user in inventory or marketplace)
   const allShirts = getSavedShirtsInventory();
   const allPants = getSavedPantsInventory();
-  const userCreatedShirts = allShirts.filter(
-    (s) => s.isCreator && (s.creatorId === profile?.id || (s.creatorUsername && s.creatorUsername.toLowerCase() === profile?.username.toLowerCase()))
-  );
-  const userCreatedPants = allPants.filter(
-    (p) => p.isCreator && (p.creatorId === profile?.id || (p.creatorUsername && p.creatorUsername.toLowerCase() === profile?.username.toLowerCase()))
-  );
+
+  const marketShirtsByUser: CustomClothingItem[] = marketplaceItems
+    .filter(
+      (m) =>
+        m.type === 'shirt' &&
+        (m.creatorId === profile?.id ||
+          (m.creatorUsername && profile?.username && m.creatorUsername.toLowerCase() === profile.username.toLowerCase()))
+    )
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      type: 'shirt',
+      dataUrl: m.dataUrl,
+      previewUrl: m.previewUrl,
+      createdAt: m.createdAt,
+      creatorId: m.creatorId,
+      creatorUsername: m.creatorUsername,
+      isCreator: true,
+    }));
+
+  const marketPantsByUser: CustomClothingItem[] = marketplaceItems
+    .filter(
+      (m) =>
+        m.type === 'pants' &&
+        (m.creatorId === profile?.id ||
+          (m.creatorUsername && profile?.username && m.creatorUsername.toLowerCase() === profile.username.toLowerCase()))
+    )
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      type: 'pants',
+      dataUrl: m.dataUrl,
+      previewUrl: m.previewUrl,
+      createdAt: m.createdAt,
+      creatorId: m.creatorId,
+      creatorUsername: m.creatorUsername,
+      isCreator: true,
+    }));
+
+  const userCreatedShirts = deduplicateCustomClothingItems([
+    ...allShirts.filter(
+      (s) =>
+        s.isCreator &&
+        (s.creatorId === profile?.id ||
+          (s.creatorUsername && profile?.username && s.creatorUsername.toLowerCase() === profile.username.toLowerCase()))
+    ),
+    ...marketShirtsByUser,
+  ]);
+
+  const userCreatedPants = deduplicateCustomClothingItems([
+    ...allPants.filter(
+      (p) =>
+        p.isCreator &&
+        (p.creatorId === profile?.id ||
+          (p.creatorUsername && profile?.username && p.creatorUsername.toLowerCase() === profile.username.toLowerCase()))
+    ),
+    ...marketPantsByUser,
+  ]);
+
   const totalUserCreations = userExperiences.length + userCreatedShirts.length + userCreatedPants.length;
 
   // User's inventory (if self, read real saved inventory)
