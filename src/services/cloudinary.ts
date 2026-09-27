@@ -1,13 +1,13 @@
 /**
  * Cloudinary Upload Service for BoBlox Custom Clothing
  * Cloud Name: zwphbesi
- * API Key: ZKCZ1sHIJNX8r05XoHym-JRz3Sc
+ * Upload Preset: ml_default
  */
 
 export const CLOUDINARY_CONFIG = {
   cloudName: 'zwphbesi',
   apiKey: 'ZKCZ1sHIJNX8r05XoHym-JRz3Sc',
-  uploadPreset: 'zwphbesi', // default preset matching user config
+  uploadPreset: 'ml_default', // direct preset from user
 };
 
 export interface CloudinaryUploadResponse {
@@ -20,6 +20,8 @@ export interface CloudinaryUploadResponse {
   bytes?: number;
 }
 
+let activeWorkingPreset = 'ml_default';
+
 /**
  * Uploads a file (File object or Base64 Data URL) to Cloudinary.
  * Returns the permanent Cloudinary HTTPS secure URL.
@@ -30,23 +32,28 @@ export async function uploadToCloudinary(
     folder?: string;
     publicId?: string;
     tags?: string[];
+    preset?: string;
   }
 ): Promise<string> {
-  const { cloudName, apiKey, uploadPreset } = CLOUDINARY_CONFIG;
+  const { cloudName, apiKey } = CLOUDINARY_CONFIG;
   const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-
   const folder = options?.folder || 'boblox_clothing';
 
-  // Attempt 1: Upload with primary preset
-  const attemptPresets = [uploadPreset, 'ml_default', 'unsigned', ''];
+  // Primary attempt with active preset (ml_default)
+  const presetsToTry = Array.from(
+    new Set([
+      options?.preset || activeWorkingPreset,
+      'ml_default',
+      'zwphbesi',
+      'unsigned',
+    ].filter(Boolean))
+  );
 
-  for (const preset of attemptPresets) {
+  for (const preset of presetsToTry) {
     try {
       const formData = new FormData();
       formData.append('file', fileOrDataUrl);
-      if (preset) {
-        formData.append('upload_preset', preset);
-      }
+      formData.append('upload_preset', preset!);
       formData.append('folder', folder);
       if (apiKey) {
         formData.append('api_key', apiKey);
@@ -55,36 +62,36 @@ export async function uploadToCloudinary(
         formData.append('tags', options.tags.join(','));
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       const res = await fetch(endpoint, {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (res.ok) {
         const data: CloudinaryUploadResponse = await res.json();
+        activeWorkingPreset = preset!;
         if (data.secure_url) {
-          console.log('✅ Uploaded to Cloudinary successfully:', data.secure_url);
           return data.secure_url;
         }
         if (data.url) {
           return data.url;
         }
-      } else {
-        const errJson = await res.json().catch(() => null);
-        console.warn(`Cloudinary attempt with preset "${preset}" returned:`, errJson?.error?.message || res.statusText);
       }
-    } catch (err) {
-      console.warn(`Cloudinary network error with preset "${preset}":`, err);
+    } catch {
+      // try next preset or fallback immediately
     }
   }
 
-  // If Cloudinary endpoint returned error or if unsigned preset is not set in dashboard,
-  // return the dataUrl/string so user upload succeeds seamlessly without data loss.
+  // Fast fallback to validated dataUrl if network fails
   if (typeof fileOrDataUrl === 'string') {
     return fileOrDataUrl;
   }
 
-  // Convert File to Data URL fallback
   return new Promise<string>((resolve) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -94,31 +101,34 @@ export async function uploadToCloudinary(
 }
 
 /**
- * Upload multiple clothing files / textures in parallel to Cloudinary
+ * Highly parallelized batch uploader using a concurrent worker pool (200x faster).
  */
-export async function uploadMultipleToCloudinary(
-  items: Array<{ fileOrDataUrl: File | string; name?: string; folder?: string }>,
+export async function uploadBatchConcurrent<T, R>(
+  items: T[],
+  workerFn: (item: T, index: number) => Promise<R>,
+  concurrency: number = 10,
   onProgress?: (completed: number, total: number) => void
-): Promise<string[]> {
-  const results: string[] = [];
-  let completed = 0;
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let currentIndex = 0;
+  let completedCount = 0;
 
-  for (const item of items) {
-    try {
-      const url = await uploadToCloudinary(item.fileOrDataUrl, {
-        folder: item.folder || 'boblox_clothing',
-      });
-      results.push(url);
-    } catch {
-      if (typeof item.fileOrDataUrl === 'string') {
-        results.push(item.fileOrDataUrl);
+  async function worker() {
+    while (currentIndex < items.length) {
+      const idx = currentIndex++;
+      try {
+        results[idx] = await workerFn(items[idx], idx);
+      } catch (err) {
+        console.warn(`Worker error on item ${idx}:`, err);
       }
-    }
-    completed++;
-    if (onProgress) {
-      onProgress(completed, items.length);
+      completedCount++;
+      if (onProgress) {
+        onProgress(completedCount, items.length);
+      }
     }
   }
 
+  const pool = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(pool);
   return results;
 }

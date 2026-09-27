@@ -186,7 +186,7 @@ export default function Marketplace({
   // Filter & Sort
   const filteredItems = items
     .filter((i) => {
-      if (invalidItemIds.has(i.id)) return false;
+      if (!i || !i.id || !i.dataUrl) return false;
       if (filterType !== 'all' && i.type !== filterType) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -1004,18 +1004,6 @@ export default function Marketplace({
                         src={item.previewUrl || item.dataUrl}
                         alt={item.name}
                         className="w-full h-full object-contain filter drop-shadow-md select-none"
-                        onError={() => {
-                          setInvalidItemIds((prev) => new Set(prev).add(item.id));
-                        }}
-                        onLoad={(e) => {
-                          const img = e.currentTarget;
-                          if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                            const ratio = img.naturalWidth / img.naturalHeight;
-                            if (ratio < 0.75 || ratio > 1.35) {
-                              setInvalidItemIds((prev) => new Set(prev).add(item.id));
-                            }
-                          }
-                        }}
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center text-purple-400">

@@ -215,13 +215,30 @@ export default function AvatarViewer({
     username?.toLowerCase() === 'probablynot' ||
     username?.toLowerCase().includes('probablyynot');
 
-  // Generate 2D Front previews for default items on mount
+  const [savedShirtsList, setSavedShirtsList] = useState<CustomClothingItem[]>([]);
+  const [savedPantsList, setSavedPantsList] = useState<CustomClothingItem[]>([]);
+
+  const reloadInventory = () => {
+    setSavedShirtsList(getSavedShirtsInventory());
+    setSavedPantsList(getSavedPantsInventory());
+  };
+
+  // Generate 2D Front previews for default items on mount & sync inventory
   useEffect(() => {
+    reloadInventory();
     const tuxData = getMemoizedTuxedo();
     generateShirt2DFrontPreview(tuxData).then((url) => setTuxedo2DPreview(url));
 
     const pantsData = getMemoizedBlackPants();
     generatePants2DFrontPreview(pantsData).then((url) => setBlackPants2DPreview(url));
+
+    const handleUpdate = () => reloadInventory();
+    window.addEventListener('boblox-marketplace-updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('boblox-marketplace-updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
   }, []);
 
   // Generate 2D Front preview whenever custom shirt changes
@@ -236,7 +253,7 @@ export default function AvatarViewer({
   // Generate 2D Front preview whenever custom pants change
   useEffect(() => {
     if (pantsDataUrl && pantsDataUrl !== getMemoizedBlackPants()) {
-      generateShirt2DFrontPreview(pantsDataUrl).then((url) => setCustomPants2DPreview(url));
+      generatePants2DFrontPreview(pantsDataUrl).then((url) => setCustomPants2DPreview(url));
     } else {
       setCustomPants2DPreview(null);
     }
@@ -1184,7 +1201,7 @@ export default function AvatarViewer({
                 </button>
 
                 {/* Saved Custom Shirts from Inventory */}
-                {getSavedShirtsInventory().map((s) => {
+                {savedShirtsList.map((s) => {
                   const isEquipped = shirtDataUrl === s.dataUrl;
                   return (
                     <button
@@ -1349,7 +1366,7 @@ export default function AvatarViewer({
                 </button>
 
                 {/* Saved Custom Pants from Inventory */}
-                {getSavedPantsInventory().map((p) => {
+                {savedPantsList.map((p) => {
                   const isEquipped = pantsDataUrl === p.dataUrl;
                   return (
                     <button

@@ -29,7 +29,7 @@ import {
   saveMultipleShirtsToInventory,
   saveMultiplePantsToInventory,
 } from '../types/avatarInventory';
-import { uploadToCloudinary } from '../services/cloudinary';
+import { uploadToCloudinary, uploadBatchConcurrent } from '../services/cloudinary';
 
 interface QueuedItem {
   id: string;
@@ -72,52 +72,55 @@ export default function BulkClothingUploader({
   const processShirtFiles = async (fileList: FileList | File[]) => {
     setIsProcessingFiles(true);
     const files = Array.from(fileList);
-    const newItems: QueuedItem[] = [];
-
-    // Base sequence starting from current count + 1
     const startIndex = queuedShirts.length;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const seqNumber = startIndex + i + 1;
-      const defaultName = `Shirt ${seqNumber}`;
+    // Process all files in parallel
+    const newItems: QueuedItem[] = await Promise.all(
+      files.map(async (file, i) => {
+        const seqNumber = startIndex + i + 1;
+        const cleanFileName = file.name
+          .replace(/\.[^/.]+$/, '')
+          .replace(/[_-]/g, ' ')
+          .trim();
+        const defaultName = cleanFileName || `Shirt ${seqNumber}`;
 
-      try {
-        const result = await validateShirtTemplate(file);
-        if (result.valid && result.dataUrl) {
-          const preview = await generateShirt2DFrontPreview(result.dataUrl);
-          newItems.push({
-            id: `shirt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${i}`,
-            name: defaultName,
-            type: 'shirt',
-            file,
-            dataUrl: result.dataUrl,
-            previewUrl: preview,
-            status: 'ready',
-          });
-        } else {
-          newItems.push({
+        try {
+          const result = await validateShirtTemplate(file);
+          if (result.valid && result.dataUrl) {
+            const preview = await generateShirt2DFrontPreview(result.dataUrl);
+            return {
+              id: `shirt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${i}`,
+              name: defaultName,
+              type: 'shirt' as const,
+              file,
+              dataUrl: result.dataUrl,
+              previewUrl: preview,
+              status: 'ready' as const,
+            };
+          } else {
+            return {
+              id: `shirt-err-${Date.now()}-${i}`,
+              name: file.name,
+              type: 'shirt' as const,
+              file,
+              dataUrl: '',
+              status: 'invalid' as const,
+              error: result.error || 'Invalid template dimensions (must be 585x559 PNG)',
+            };
+          }
+        } catch {
+          return {
             id: `shirt-err-${Date.now()}-${i}`,
             name: file.name,
-            type: 'shirt',
+            type: 'shirt' as const,
             file,
             dataUrl: '',
-            status: 'invalid',
-            error: result.error || 'Invalid template dimensions (must be 585x559 PNG)',
-          });
+            status: 'invalid' as const,
+            error: 'Failed to read image file',
+          };
         }
-      } catch (err) {
-        newItems.push({
-          id: `shirt-err-${Date.now()}-${i}`,
-          name: file.name,
-          type: 'shirt',
-          file,
-          dataUrl: '',
-          status: 'invalid',
-          error: 'Failed to read image file',
-        });
-      }
-    }
+      })
+    );
 
     setQueuedShirts((prev) => {
       const updated = [...prev, ...newItems];
@@ -139,15 +142,7 @@ export default function BulkClothingUploader({
         unique.push(item);
       }
 
-      let validCount = 0;
-      return unique.map((item) => {
-        if (item.status === 'ready') {
-          validCount++;
-          // Keep custom name or format
-          return item;
-        }
-        return item;
-      });
+      return unique;
     });
     setIsProcessingFiles(false);
   };
@@ -155,54 +150,54 @@ export default function BulkClothingUploader({
   const processPantsFiles = async (fileList: FileList | File[]) => {
     setIsProcessingFiles(true);
     const files = Array.from(fileList);
-    const newItems: QueuedItem[] = [];
-
     const startIndex = queuedPants.length;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const cleanFileName = file.name
-        .replace(/\.[^/.]+$/, '')
-        .replace(/[_-]/g, ' ')
-        .trim();
-      const defaultName = cleanFileName || `Pants ${startIndex + i + 1}`;
+    // Process all pants in parallel
+    const newItems: QueuedItem[] = await Promise.all(
+      files.map(async (file, i) => {
+        const cleanFileName = file.name
+          .replace(/\.[^/.]+$/, '')
+          .replace(/[_-]/g, ' ')
+          .trim();
+        const defaultName = cleanFileName || `Pants ${startIndex + i + 1}`;
 
-      try {
-        const result = await validatePantsTemplate(file);
-        if (result.valid && result.dataUrl) {
-          const preview = await generatePants2DFrontPreview(result.dataUrl);
-          newItems.push({
-            id: `pants-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${i}`,
-            name: defaultName,
-            type: 'pants',
-            file,
-            dataUrl: result.dataUrl,
-            previewUrl: preview,
-            status: 'ready',
-          });
-        } else {
-          newItems.push({
+        try {
+          const result = await validatePantsTemplate(file);
+          if (result.valid && result.dataUrl) {
+            const preview = await generatePants2DFrontPreview(result.dataUrl);
+            return {
+              id: `pants-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${i}`,
+              name: defaultName,
+              type: 'pants' as const,
+              file,
+              dataUrl: result.dataUrl,
+              previewUrl: preview,
+              status: 'ready' as const,
+            };
+          } else {
+            return {
+              id: `pants-err-${Date.now()}-${i}`,
+              name: file.name,
+              type: 'pants' as const,
+              file,
+              dataUrl: '',
+              status: 'invalid' as const,
+              error: result.error || 'Invalid template dimensions (must be 585x559 PNG)',
+            };
+          }
+        } catch {
+          return {
             id: `pants-err-${Date.now()}-${i}`,
             name: file.name,
-            type: 'pants',
+            type: 'pants' as const,
             file,
             dataUrl: '',
-            status: 'invalid',
-            error: result.error || 'Invalid template dimensions (must be 585x559 PNG)',
-          });
+            status: 'invalid' as const,
+            error: 'Failed to read image file',
+          };
         }
-      } catch (err) {
-        newItems.push({
-          id: `pants-err-${Date.now()}-${i}`,
-          name: file.name,
-          type: 'pants',
-          file,
-          dataUrl: '',
-          status: 'invalid',
-          error: 'Failed to read image file',
-        });
-      }
-    }
+      })
+    );
 
     setQueuedPants((prev) => {
       const updated = [...prev, ...newItems];
@@ -278,97 +273,94 @@ export default function BulkClothingUploader({
       const totalSteps = totalValidItems * 2; // texture + preview for each
       let currentStep = 0;
 
-      // 1. Upload all Shirts to Cloudinary (with fallback to validated dataUrl)
-      const customShirts: CustomClothingItem[] = [];
-      for (let i = 0; i < validShirts.length; i++) {
-        const s = validShirts[i];
-        
-        // Upload template texture to Cloudinary
-        let cloudTextureUrl = s.dataUrl;
-        try {
-          cloudTextureUrl = await uploadToCloudinary(s.dataUrl, {
-            folder: 'boblox_clothing/shirts',
-            tags: ['shirt', currentUser.username],
-          });
-        } catch (err) {
-          console.warn('Cloudinary shirt upload fallback:', err);
+      // 1. Upload all Shirts concurrently
+      const customShirts: CustomClothingItem[] = await uploadBatchConcurrent(
+        validShirts,
+        async (s, i) => {
+          let cloudTextureUrl = s.dataUrl;
+          let cloudPreviewUrl = s.previewUrl;
+
+          // Parallelize texture & preview for each item
+          const [texRes, prevRes] = await Promise.all([
+            uploadToCloudinary(s.dataUrl, {
+              folder: 'boblox_clothing/shirts',
+              tags: ['shirt', currentUser.username],
+              preset: 'ml_default',
+            }).catch(() => s.dataUrl),
+            s.previewUrl
+              ? uploadToCloudinary(s.previewUrl, {
+                  folder: 'boblox_clothing/previews',
+                  tags: ['preview', 'shirt'],
+                  preset: 'ml_default',
+                }).catch(() => s.previewUrl)
+              : Promise.resolve(undefined),
+          ]);
+
+          if (texRes) cloudTextureUrl = texRes;
+          if (prevRes) cloudPreviewUrl = prevRes;
+
+          return {
+            id: s.id,
+            name: s.name,
+            type: 'shirt' as const,
+            dataUrl: cloudTextureUrl,
+            previewUrl: cloudPreviewUrl,
+            createdAt: now - i * 100,
+            creatorId: currentUser.id,
+            creatorUsername: currentUser.username,
+            isCreator: true,
+          };
+        },
+        12,
+        (completed, total) => {
+          const ratio = (completed / Math.max(1, totalValidItems)) * 80;
+          setUploadProgress(Math.min(85, Math.round(ratio)));
         }
-        currentStep++;
-        setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
+      );
 
-        // Upload preview to Cloudinary if available
-        let cloudPreviewUrl = s.previewUrl;
-        if (s.previewUrl) {
-          try {
-            cloudPreviewUrl = await uploadToCloudinary(s.previewUrl, {
-              folder: 'boblox_clothing/previews',
-              tags: ['preview', 'shirt'],
-            });
-          } catch (err) {
-            console.warn('Cloudinary preview upload fallback:', err);
-          }
+      // 2. Upload all Pants concurrently
+      const customPants: CustomClothingItem[] = await uploadBatchConcurrent(
+        validPants,
+        async (p, i) => {
+          let cloudTextureUrl = p.dataUrl;
+          let cloudPreviewUrl = p.previewUrl;
+
+          const [texRes, prevRes] = await Promise.all([
+            uploadToCloudinary(p.dataUrl, {
+              folder: 'boblox_clothing/pants',
+              tags: ['pants', currentUser.username],
+              preset: 'ml_default',
+            }).catch(() => p.dataUrl),
+            p.previewUrl
+              ? uploadToCloudinary(p.previewUrl, {
+                  folder: 'boblox_clothing/previews',
+                  tags: ['preview', 'pants'],
+                  preset: 'ml_default',
+                }).catch(() => p.previewUrl)
+              : Promise.resolve(undefined),
+          ]);
+
+          if (texRes) cloudTextureUrl = texRes;
+          if (prevRes) cloudPreviewUrl = prevRes;
+
+          return {
+            id: p.id,
+            name: p.name,
+            type: 'pants' as const,
+            dataUrl: cloudTextureUrl,
+            previewUrl: cloudPreviewUrl,
+            createdAt: now - (validShirts.length + i) * 100,
+            creatorId: currentUser.id,
+            creatorUsername: currentUser.username,
+            isCreator: true,
+          };
+        },
+        12,
+        (completed, total) => {
+          const ratio = ((validShirts.length + completed) / Math.max(1, totalValidItems)) * 80;
+          setUploadProgress(Math.min(85, Math.round(ratio)));
         }
-        currentStep++;
-        setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
-
-        customShirts.push({
-          id: s.id,
-          name: s.name,
-          type: 'shirt',
-          dataUrl: cloudTextureUrl,
-          previewUrl: cloudPreviewUrl,
-          createdAt: now - i * 100,
-          creatorId: currentUser.id,
-          creatorUsername: currentUser.username,
-          isCreator: true,
-        });
-      }
-
-      // 2. Upload all Pants to Cloudinary (with fallback to validated dataUrl)
-      const customPants: CustomClothingItem[] = [];
-      for (let i = 0; i < validPants.length; i++) {
-        const p = validPants[i];
-
-        // Upload template texture to Cloudinary
-        let cloudTextureUrl = p.dataUrl;
-        try {
-          cloudTextureUrl = await uploadToCloudinary(p.dataUrl, {
-            folder: 'boblox_clothing/pants',
-            tags: ['pants', currentUser.username],
-          });
-        } catch (err) {
-          console.warn('Cloudinary pants upload fallback:', err);
-        }
-        currentStep++;
-        setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
-
-        // Upload preview to Cloudinary if available
-        let cloudPreviewUrl = p.previewUrl;
-        if (p.previewUrl) {
-          try {
-            cloudPreviewUrl = await uploadToCloudinary(p.previewUrl, {
-              folder: 'boblox_clothing/previews',
-              tags: ['preview', 'pants'],
-            });
-          } catch (err) {
-            console.warn('Cloudinary pants preview upload fallback:', err);
-          }
-        }
-        currentStep++;
-        setUploadProgress(Math.min(85, Math.round((currentStep / totalSteps) * 80)));
-
-        customPants.push({
-          id: p.id,
-          name: p.name,
-          type: 'pants',
-          dataUrl: cloudTextureUrl,
-          previewUrl: cloudPreviewUrl,
-          createdAt: now - (validShirts.length + i) * 100,
-          creatorId: currentUser.id,
-          creatorUsername: currentUser.username,
-          isCreator: true,
-        });
-      }
+      );
 
       // 3. Save to User Inventory
       setUploadProgress(90);
