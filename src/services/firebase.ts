@@ -107,6 +107,8 @@ export interface UserProfile {
   followers: string[]; // List of user UIDs
   following: string[]; // List of user UIDs
   bio?: string;
+  role?: string;
+  isAdmin?: boolean;
 }
 
 // Live In-Game Player Presence

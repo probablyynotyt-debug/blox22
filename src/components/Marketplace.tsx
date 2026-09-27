@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import BulkClothingUploader from './BulkClothingUploader';
 import { AvatarColors, DEFAULT_GREY } from './AvatarViewer';
-import VerifiedBadge, { isOwnerUser } from './VerifiedBadge';
+import VerifiedBadge, { isOwnerUser, isVerifiedUser } from './VerifiedBadge';
 import {
   MarketplaceClothingItem,
   getSavedMarketplaceItems,
@@ -880,15 +880,21 @@ export default function Marketplace({
           </p>
         </div>
 
-        {/* Studio Upload & Bulk Upload CTAs */}
+        {/* Studio Upload & Bulk Upload CTAs (Bulk Upload is only visible to Admins/Owners) */}
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setShowBulkUploadModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/50 transition-all flex items-center gap-2 cursor-pointer hover:scale-105"
-          >
-            <Upload className="w-4 h-4" />
-            <span>Bulk Upload (Shirts & Pants)</span>
-          </button>
+          {(isVerifiedUser(currentUser?.username) ||
+            isOwnerUser(currentUser?.username) ||
+            currentUser?.role === 'admin' ||
+            currentUser?.isAdmin === true ||
+            currentUser?.email === 'haydensixseven@gmail.com') && (
+            <button
+              onClick={() => setShowBulkUploadModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/50 transition-all flex items-center gap-2 cursor-pointer hover:scale-105"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Bulk Upload (Admin)</span>
+            </button>
+          )}
 
           <button
             onClick={onOpenStudio}

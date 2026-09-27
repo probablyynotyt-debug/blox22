@@ -82,6 +82,7 @@ export async function getSavedMarketplaceItems(): Promise<MarketplaceClothingIte
 
   let baseItems: MarketplaceClothingItem[] = [];
 
+  // 1. Try LocalStorage for instant render
   try {
     const raw = localStorage.getItem(MARKETPLACE_STORAGE_KEY);
     if (raw) {
@@ -97,12 +98,31 @@ export async function getSavedMarketplaceItems(): Promise<MarketplaceClothingIte
     console.error('Failed to load local marketplace:', e);
   }
 
+  // 2. Fetch directly from Firestore collection for fresh devices/Render builds
+  try {
+    const snap = await getDocs(collection(db, 'marketplace_items'));
+    if (!snap.empty) {
+      const remoteDocs = snap.docs
+        .map((d) => d.data() as MarketplaceClothingItem)
+        .filter(
+          (item) => !isFirebaseStorageOrDeletedUrl(item.dataUrl) && !isFirebaseStorageOrDeletedUrl(item.previewUrl)
+        );
+      if (remoteDocs.length > 0) {
+        baseItems = [...remoteDocs, ...baseItems];
+      }
+    }
+  } catch (err) {
+    // offline or Firestore connecting
+  }
+
+  // 3. Fallback seeds if completely empty
   if (baseItems.length === 0) {
-    baseItems = await getSeedMarketplaceItems();
+    const seeds = await getSeedMarketplaceItems();
+    baseItems = seeds;
   }
 
   // Ensure deduplication & clean items
-  const deduplicated = deduplicateMarketplaceItems(baseItems, true);
+  const deduplicated = deduplicateMarketplaceItems(baseItems, false);
 
   memoryCache = deduplicated;
   try {

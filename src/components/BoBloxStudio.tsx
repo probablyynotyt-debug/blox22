@@ -25,7 +25,7 @@ import {
   Save
 } from 'lucide-react';
 import AvatarProfileIcon from './AvatarProfileIcon';
-import VerifiedBadge, { isOwnerUser } from './VerifiedBadge';
+import VerifiedBadge, { isOwnerUser, isVerifiedUser } from './VerifiedBadge';
 import { AvatarColors } from './AvatarViewer';
 import { UserProfile } from '../services/firebase';
 import {
@@ -441,20 +441,26 @@ export default function BoBloxStudio({
             </span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('bulk-upload')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer shrink-0 ${
-              activeTab === 'bulk-upload'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
-                : 'text-emerald-300/80 hover:text-white hover:bg-emerald-950/40 border border-emerald-500/20'
-            }`}
-          >
-            <Upload className="w-4 h-4 text-emerald-400" />
-            <span>Bulk Uploader</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-200 font-bold border border-emerald-400/30">
-              BATCH
-            </span>
-          </button>
+          {(isVerifiedUser(currentUser?.username) ||
+            isOwnerUser(currentUser?.username) ||
+            currentUser?.role === 'admin' ||
+            currentUser?.isAdmin === true ||
+            currentUser?.email === 'haydensixseven@gmail.com') && (
+            <button
+              onClick={() => setActiveTab('bulk-upload')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer shrink-0 ${
+                activeTab === 'bulk-upload'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'text-emerald-300/80 hover:text-white hover:bg-emerald-950/40 border border-emerald-500/20'
+              }`}
+            >
+              <Upload className="w-4 h-4 text-emerald-400" />
+              <span>Bulk Uploader</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-200 font-bold border border-emerald-400/30">
+                ADMIN
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Search & Reset All Games in Experiences */}
@@ -920,17 +926,22 @@ export default function BoBloxStudio({
       )}
 
       {/* ================= TAB 3: BULK CLOTHING UPLOADER ================= */}
-      {activeTab === 'bulk-upload' && (
-        <BulkClothingUploader
-          currentUser={currentUser}
-          onUploadComplete={() => {
-            setSavedShirts(getSavedShirtsInventory());
-            setSavedPants(getSavedPantsInventory());
-          }}
-          onOpenMarketplace={onOpenMarketplace}
-          onOpenAvatarEditor={onOpenAvatarEditor}
-        />
-      )}
+      {activeTab === 'bulk-upload' &&
+        (isVerifiedUser(currentUser?.username) ||
+          isOwnerUser(currentUser?.username) ||
+          currentUser?.role === 'admin' ||
+          currentUser?.isAdmin === true ||
+          currentUser?.email === 'haydensixseven@gmail.com') && (
+          <BulkClothingUploader
+            currentUser={currentUser}
+            onUploadComplete={() => {
+              setSavedShirts(getSavedShirtsInventory());
+              setSavedPants(getSavedPantsInventory());
+            }}
+            onOpenMarketplace={onOpenMarketplace}
+            onOpenAvatarEditor={onOpenAvatarEditor}
+          />
+        )}
 
       {/* ================= CREATE EXPERIENCE MODAL ================= */}
       {showCreateModal && (
